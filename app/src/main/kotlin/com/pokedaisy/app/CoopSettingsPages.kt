@@ -122,8 +122,8 @@ internal class CoopSettingsPages(
             .map { rom ->
                 val save = SavesLocation.saveFor(activity, prefs, rom)
                 val id = if (save.isFile) CoopSaveId.read(save) else null
-                val pair = id?.let { i -> pairs.firstOrNull { it.ownSave == i } }
-                CoopSaveChoice(rom, save, GameTitles.label(activity, prefs, rom), id, pair?.partner?.name)
+                val friends = id?.let { i -> pairs.filter { it.ownSave == i } }.orEmpty()
+                CoopSaveChoice(rom, save, GameTitles.label(activity, prefs, rom), id, friends.lastOrNull()?.partner?.name, friends.size)
             }
     }
 
@@ -231,12 +231,13 @@ internal class CoopSettingsPages(
         CoopPairBody(view, actions, m, small)
     }
 
-    /** PARTNERS: the pairings, one row each; a tap asks UNPAIR ([UnpairConfirm]). [revision] reloads them. */
+    /** FRIENDS: every friend of every save, one row each (ONLINE while connected); a tap asks UNPAIR ([UnpairConfirm]). [revision] reloads them. */
     @Composable
     fun PartnersPage(m: GbaTextMetrics, revision: Int) {
         LaunchedEffect(revision) { loadPairs() }
-        val rows = if (pairs.isEmpty()) listOf(SettingRow(tk("NO PARTNERS YET"), null, enabled = false) {})
-        else coopPartnerRows(pairs) { unpairing = it }
+        val online = CoopSession.friends.collectAsState().value.filter { it.connected }.map { it.peer }.toSet()
+        val rows = if (pairs.isEmpty()) listOf(SettingRow(tk("NO FRIENDS YET"), null, enabled = false) {})
+        else coopPartnerRows(pairs, online) { unpairing = it }
         Column(Modifier.fillMaxWidth()) {
             OptionListWindow(m, Modifier.fillMaxWidth().weight(1f, fill = false)) {
                 GroupedRows(rows, m, cursor = -1, onClick = { rows[it].onClick() })
@@ -256,7 +257,7 @@ internal class CoopSettingsPages(
             onDismiss = { unpairing = null },
             onConfirm = {
                 unpairing = null
-                CoopSession.unpair(activity, p.ownSave)
+                CoopSession.unpair(activity, p.ownSave, p.partner.peer)
                 pairs = pairs - p
                 changed()
             },
