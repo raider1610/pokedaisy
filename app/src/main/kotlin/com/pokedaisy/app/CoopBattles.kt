@@ -68,6 +68,8 @@ interface CoopGlueEnv {
     fun beforeSave(): Boolean
     /** The co-op busy state changed (RetroAchievements idle). */
     fun busyChanged(busy: Boolean) {}
+    /** Before the spots are read: the partner among the friends may change while the flow is [idle] ([CoopBattleTarget.choose]). */
+    fun pickPartner(idle: Boolean) {}
     /** The story spot the player stands at (or waits parked at): [CoopJoinRules.StoryAt.NONE] when none. */
     fun storyAt(): CoopJoinRules.StoryAt = CoopJoinRules.StoryAt.NONE
     /** The save is in "play together only" mode (a story battle dropped for good blacks the player out). */
@@ -182,6 +184,7 @@ class CoopBattleGlue(
         val now = clock()
         if (now - lastSpots >= SPOTS_MS) {
             lastSpots = now
+            env.pickPartner(flow.idle)
             flow.mySpot = env.mySpot(); flow.partnerSpot = env.partnerSpot(); flow.range = env.range
             storyNow = env.storyAt().let { if (it.beaten) 0 else it.eventId }
         }
@@ -295,6 +298,63 @@ class CoopPresenceChannel(private val link: CoopLink) : CoopPresenceLink {
     companion object { const val PRESENCE_TYPE = 0x0100 }
 }
 
+/**
+ * Presence with every friend (type 0x0100, [CoopPresenceChannel]'s updates): [send] goes to every connected friend
+ * ([link] is the session's all-friends link), [receivedFrom] names each update's sender (its peer id, hex), and [gone]
+ * names a friend whose link is no longer up.
+ */
+class CoopFriendsPresenceChannel(
+    private val link: CoopLink,
+    messages: Flow<com.pokedaisy.app.companion.coop.CoopFriendMessage>,
+    friends: Flow<List<com.pokedaisy.app.companion.coop.CoopFriendState>>,
+) : CoopPresenceFriendsLink {
+    override fun send(bytes: ByteArray) { try { link.send(CoopPresenceChannel.PRESENCE_TYPE, bytes) } catch (e: IllegalArgumentException) {} }
+
+    override val received: Flow<ByteArray> =
+        messages.filter { it.message.type == CoopPresenceChannel.PRESENCE_TYPE }.map { it.message.payload }
+
+    override val receivedFrom: Flow<Pair<String, ByteArray>> =
+        messages.filter { it.message.type == CoopPresenceChannel.PRESENCE_TYPE }.map { it.peer.hex to it.message.payload }
+
+    override val gone: Flow<String> = kotlinx.coroutines.flow.flow {
+        var up = emptySet<String>()
+        friends.collect { list ->
+            val now = list.filter { it.connected }.map { it.peer.hex }.toSet()
+            for (k in up - now) emit(k)
+            up = now
+        }
+    }
+}
+
+/**
+ * Presence with everyone in the room (CO-OP MODE ROOM): updates go to the server (QUIC datagrams, or frames over TCP),
+ * which hands each player everyone else's latest every tick. Keys are [key] of the member id.
+ */
+class CoopRoomPresenceChannel(private val link: com.pokedaisy.app.companion.coop.room.CoopRoomLink) : CoopPresenceFriendsLink {
+    private val from = kotlinx.coroutines.flow.MutableSharedFlow<Pair<String, ByteArray>>(extraBufferCapacity = 256)
+    private val left = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 64)
+
+    init {
+        link.presence = { id, bytes -> from.tryEmit(key(id) to bytes) }
+        link.gone = { id -> left.tryEmit(key(id)) }
+    }
+
+    override fun send(bytes: ByteArray) { link.sendPresence(bytes) }
+    override val received: Flow<ByteArray> = from.map { it.second }
+    override val receivedFrom: Flow<Pair<String, ByteArray>> = from
+    override val gone: Flow<String> = left
+
+    /** Lets go of the link's callbacks (the next channel, or none, takes them). */
+    fun close() {
+        link.presence = { _, _ -> }
+        link.gone = {}
+    }
+
+    companion object {
+        fun key(member: Int): String = "room:$member"
+    }
+}
+
 /** The app side [CoopBattles.attach] needs: the engine, the overlays, the player's facts. Implemented by the activity. */
 interface CoopApp {
     /** FeatureFlags.coop. */
@@ -324,15 +384,21 @@ object CoopBattles {
     fun mayHook(romSha1: String?, flagOn: Boolean, link: CoopLink?): Boolean =
         flagOn && link != null && romSha1 == EMERALD_COOP_SHA1
 
-    /** The glue for this game, hooked into the engine; false (nothing touched) for anything but retail Emerald with the flag. */
-    fun attach(app: CoopApp, link: CoopLink?, romSha1: String?): Boolean {
+    /**
+     * The glue for this game, hooked into the engine; false (nothing touched) for anything but retail Emerald with the flag.
+     * With [target] the battles talk to one friend at a time through it (the friends' partner); else to [link] alone.
+     */
+    fun attach(app: CoopApp, link: CoopLink?, romSha1: String?, target: CoopBattleTarget<*>? = null): Boolean {
         detach()
-        if (link == null || !mayHook(romSha1, app.coopOn, link)) return false
-        val channel = CoopLinkChannel(link)
+        // A target (friends, room) carries its own link state; a plain link needs the link.
+        if (target == null && link == null) return false
+        if (!(app.coopOn && romSha1 == EMERALD_COOP_SHA1)) return false
+        val channel: CoopBattleChannel = target ?: CoopLinkChannel(link!!)
         val g = CoopBattleGlue(app.core(), channel, app.emu, android.os.SystemClock::elapsedRealtime, app.overlay, app.env, linkEngine = MgbaLinkEngine())
         val s = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         s.launch { channel.received.collect { runCatching { g.onReceived(it.first, it.second) } } }
-        s.launch { link.state.map { it is CoopState.Connected }.distinctUntilChanged().collect { g.onLinkState(it) } }
+        val up: Flow<Boolean> = target?.connectedState ?: link!!.state.map { it is CoopState.Connected }
+        s.launch { up.distinctUntilChanged().collect { g.onLinkState(it) } }
         scope = s
         glue = g
         CoopGuards.battleActive = { busy }

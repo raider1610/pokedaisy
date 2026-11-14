@@ -1,0 +1,29 @@
+[package]
+name = "pokedaisy-coop-server"
+description = "PokeDaisy co-op room server: rooms over QUIC with a TCP + TLS fallback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "pokedaisy-coop-server"
+path = "src/main.rs"
+
+[dependencies]
+pokedaisy-coop-proto.workspace = true
+quinn.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+tokio.workspace = true
+rcgen.workspace = true
+rustls-pemfile.workspace = true
+log.workspace = true
+bytes = "1"
+
+[dev-dependencies]
+pokedaisy-coop-client.workspace = true
+tempfile = "3"

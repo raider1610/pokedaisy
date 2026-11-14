@@ -536,7 +536,17 @@ interface CompanionSettings {
     var coopNearbyRange: Int
         get() = 8
         set(_) {}
-    fun coopUnpair(save: com.pokedaisy.app.companion.coop.CoopSaveId) {}
+    /** Removes the friend [peer] of [save]. */
+    fun coopUnpair(save: com.pokedaisy.app.companion.coop.CoopSaveId, peer: com.pokedaisy.app.companion.coop.CoopPeerId) {}
+    /** The friends whose link is up in the running game (FRIENDS' ONLINE). */
+    val coopOnline: Set<com.pokedaisy.app.companion.coop.CoopPeerId> get() = emptySet()
+    /** CO-OP MODE ROOM ([com.pokedaisy.app.companion.coop.room.CoopRoomSession]): the room rows replace the friends'. */
+    val coopRoomMode: Boolean get() = false
+    val coopRoomName: String get() = ""
+    val coopRoomState: com.pokedaisy.app.companion.coop.room.RoomState get() = com.pokedaisy.app.companion.coop.room.RoomState.Off()
+    /** Why the room stayed off for this game, or null. */
+    val coopRoomGate: com.pokedaisy.app.companion.coop.room.RoomOffReason? get() = null
+    val coopRoomMembers: List<com.pokedaisy.app.companion.coop.room.RoomMember> get() = emptyList()
     /** PLAY TOGETHER ONLY: the running game's lock state and actions (null = the row is hidden). */
     val coopLock: com.pokedaisy.app.companion.coop.lock.CoopLockUi? get() = null
     val coopLockActions: com.pokedaisy.app.companion.coop.lock.CoopLockActions? get() = null

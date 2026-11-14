@@ -3,7 +3,7 @@ title: Play together
 summary: How to pair with a friend's Emerald save, what the link shows, and how to battle together.
 section: player
 order: 20
-keywords: [co-op, coop, multiplayer, two player, netplay, online, link, friend, invite, qr, room, room code, lobby, open rooms]
+keywords: [co-op, coop, friends, friend list, multiplayer, two player, netplay, online, link, friend, invite, qr, room, room code, lobby, open rooms]
 ---
 
 > DRAFT, not published. Co-op is behind `FeatureFlags.coop` (off by default), so this page lives in
@@ -14,20 +14,22 @@ keywords: [co-op, coop, multiplayer, two player, netplay, online, link, friend, 
 > (`coop-invite`, `coop-confirm`, `companion-coop-connected`: the invented save's trainer, never a real
 > name). No shots exist yet, so this page references none. Delete this note when it moves.
 
-Co-op lets two players, each on their own device with their own Emerald save, pair up and fight wild and trainer battles
-together. You pair first, the link between your devices stays alive, and then the battles can be shared.
+Co-op lets you and your friends, each on your own device with your own Emerald save, see each other walking around
+your maps and fight wild and trainer battles together. You pair once with each friend. After that, whenever you start
+your game with an internet connection, every friend who is playing at the same time is linked to you.
 
 ## What you need
 
-- Pokémon Emerald (English) on both devices, and the same ROM on both.
+- Pokémon Emerald on both devices, the same ROM on both: English, or German (Pokémon Smaragd-Edition). With the German
+  game you see each other, but battling together and PLAYING TOGETHER ONLY need the English game for now.
 - A save you have saved in the game at least once.
 - Both devices on the internet. The same Wi-Fi is not required.
 - No cheats loaded. The link stays off while any cheat is on. Once the link is on, switching a cheat on is refused with a notice.
 
 ## The pairing page
 
-On the top screen open Settings, then `CO-OP`, then `PAIR`. Under `PICK A SAVE`, tap the save you want to pair (each save
-has one partner). The page then has three tabs down its left side:
+On the top screen open Settings, then `CO-OP`, then `PAIR`. Under `PICK A SAVE`, tap the save you want to pair. A save can
+have up to 12 friends: pair once with each of them. The page then has three tabs down its left side:
 
 - `YOUR ROOM`: your room code, and the same invite as a QR code and a link.
 - `JOIN`: type someone's code, pick an open room, or paste a link.
@@ -75,10 +77,18 @@ use a code or the link, or try `BY IP`.
 `BY IP`, also in `NEARBY`, shows your address. Type your partner's address in the box and tap `CONNECT`. Use it when the
 same Wi-Fi list stays empty, for example on a network that blocks discovery.
 
-## Partners and unpairing
+## Friends
 
-`PARTNERS` lists every pairing, one row each, with the save it belongs to. A save has one partner. To pair it
-with someone else, tap the row and choose `UNPAIR` first. The same list is in the companion's SETTINGS.
+`FRIENDS` lists every friend, one row each, with the save they are a friend of. `ONLINE` shows next to a friend who is
+linked to your running game right now. A save keeps up to 12 friends. To remove a friend, tap their row and choose
+`UNPAIR`: only that friend goes, the others stay. The same list is in the companion's SETTINGS.
+
+## Seeing each other
+
+When you play, every friend who is online and on the same map as you walks around your screen: walking, running, on
+either bike or surfing, in their own look. You see the four nearest at once; when one leaves, the next one shows up.
+They are only pictures. You walk through each other, and nothing is written into your game or your save. A friend on
+another map, or just across a map's border, doesn't show until you are both on the same map.
 
 ## Relay and relay only
 
@@ -90,6 +100,24 @@ comes with a relay of its own, or you type one. With no relay at all, only `SAME
 | `RELAY` | Shows which relay is used: the build's own, one you typed (https only) or `NONE`. |
 | `RELAY ONLY` | Never connects directly, so your partner never sees your IP address. It can be slower, and `SAME WI-FI` and `BY IP` are hidden. |
 
+## Room servers (CO-OP MODE: ROOM)
+
+Instead of paired friends you can join a **room on a server**. Everyone in the same room sees everyone else on their
+map, and battles can be joined with the nearest free player, as with friends. You don't need to pair first. Whoever
+runs the server gives you four things. Enter them in Settings > CO-OP > CO-OP MODE: **ROOM**, then **ROOM SERVER**:
+
+- **SERVER**: the server's address, for example `coop.example.com` or `coop.example.com:9595`.
+- **FINGERPRINT**: the code the server prints when it starts (`AB:CD:…`). The app connects only to the server with
+  exactly this fingerprint, so nobody can pose as it.
+- **KEY**: your access key.
+- **ROOM**: the room's name. Everyone who types the same name (upper or lower case doesn't matter) is together.
+
+The next game you start joins the room. In-game SETTINGS > CO-OP shows LINK (connected, reconnecting, or what to fix)
+and PLAYERS (who's there). English and German Emerald share a room and see each other. Joined battles need English Emerald on
+both sides, the same ROM as the other player. Cheats are off while you're in a room, as with friends.
+
+Switching CO-OP MODE back to **FRIENDS** keeps your friends and pairings as they were. Only one mode runs at a time.
+
 ## The link in the companion
 
 The companion's SETTINGS has a `LINK` row that tells you where the link stands.
@@ -97,10 +125,10 @@ The companion's SETTINGS has a `LINK` row that tells you where the link stands.
 | Value | What it means |
 | --- | --- |
 | `OFF` | Nothing is running yet, or there is no save to pair. |
-| `CONNECTING` | Looking for your partner. |
-| `CONNECTED` | Your partner is there. |
+| `CONNECTING` | Looking for your friends. |
+| `CONNECTED` | At least one friend is there. The row names one of them. |
 | `RECONNECTING` | The connection dropped and the app is trying again. |
-| `NOT PAIRED` | This save has no partner. Pair it first. |
+| `NOT PAIRED` | This save has no friends yet. Pair it first. |
 | `NOT RECOGNISED` | Your partner's device didn't accept you, for example after they unpaired. Pair again. |
 | `CHEATS ON` | Turn every cheat off to use the link. |
 | `NOT EMERALD` | The game running isn't English Emerald. |
@@ -111,7 +139,8 @@ The companion's SETTINGS has a `LINK` row that tells you where the link stands.
 | --- | --- |
 | Your partner's PokeDaisy is a different version | Update both devices to the same version. |
 | Your partner plays a different Emerald ROM | Both of you need the same ROM. |
-| This save is already paired | Open `PARTNERS` and `UNPAIR` it first. |
+| You're already friends with this player | Nothing to do: they are on your `FRIENDS` list already. |
+| This save has all the friends it can keep | Open `FRIENDS` and remove one first. |
 | The other player said no | Ask them to try again and accept. |
 | Couldn't reach your partner | Check both internet connections, then `TRY AGAIN`. |
 | No answer | The other device didn't respond in time. `TRY AGAIN`. |
@@ -124,8 +153,9 @@ The companion's SETTINGS has a `LINK` row that tells you where the link stands.
 
 ## Battling together
 
-Once you are paired and both devices are connected, a wild battle, a trainer battle or a story battle can be shared.
-Your partner can join yours, and you can join theirs. A joined battle is the game's own link battle, running in both
+Once you and a friend are both connected, a wild battle, a trainer battle or a story battle can be shared. Your
+friend can join yours, and you can join theirs. A battle is always two players. With several friends online, the
+prompt goes to the nearest friend who is free (see below); if a friend asks you first, you answer them. A joined battle is the game's own link battle, running in both
 games at once: each of you plays it in your own game, from your own side, with your own game's menus, at your own
 screen's size. Nothing is streamed from one device to the other and nothing is drawn over the battle.
 
@@ -137,9 +167,9 @@ goes on alone. While the prompt is open, the battle waits at its start on the de
 
 ### Who can join
 
-- Your partner must be on the same map as you and within `NEARBY RANGE` steps of you. Set it in the CO-OP group
+- Your friend must be on the same map as you and within `NEARBY RANGE` steps of you. Set it in the CO-OP group
   of SETTINGS: `2 STEPS`, `4 STEPS`, `8 STEPS` (the default), `16 STEPS` or `32 STEPS`.
-- Your partner must be free: walking around, or on the top level of the START menu. Someone who is in a battle,
+- Your friend must be free: walking around, or on the top level of the START menu. Someone who is in a battle,
   in a menu screen, in a talk or on a fade is not asked.
 - Ordinary wild battles, battles against two trainers at once, battles against one trainer who has two or more
   Pokémon, and story battles (see below) can be joined. A trainer with only one Pokémon, a legendary or other one off
@@ -217,8 +247,10 @@ Until the battle is over you can't load or save a state, rewind, restart or soft
 
 ## Playing together only
 
-`PLAY TOGETHER ONLY` is in the companion's SETTINGS, in the `CO-OP` group. It turns your two games into one shared
-run: you can only play while your partner is connected, and the story waits for both of you.
+`PLAY TOGETHER ONLY` is in the companion's SETTINGS, in the `CO-OP` group. It turns your game and one friend's into one
+shared run: you can only play while that friend is connected, and the story waits for both of you. It is always with
+your first friend for this save (the one you paired with longest ago); your other friends still see you and can still
+join your battles.
 
 ### When you can turn it on
 

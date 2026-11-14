@@ -170,6 +170,8 @@ android {
 
     sourceSets["main"].java.srcDirs("src/main/kotlin")
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/licenses"))
+    // CO-OP MODE ROOM's client (server/coop-room/client, Rust), built by coopRoomNative below.
+    sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("coop-room/jniLibs"))
     sourceSets["test"].java.srcDirs("src/test/kotlin", "../server/coop-relay/src/main/kotlin")
 
     testOptions {
@@ -209,6 +211,7 @@ val licensesAsset by tasks.registering {
         "Apache Commons - NOTICE" to "third_party/licenses/Apache-Commons-NOTICE.txt",
         "XZ for Java - BSD Zero Clause" to "third_party/licenses/XZ-Java-0BSD.txt",
         "Bouncy Castle (co-op) - MIT" to "third_party/licenses/BouncyCastle-MIT.txt",
+        "Co-op room client crates (quinn, rustls, ring, tokio, ...) - MIT / Apache 2.0 / ISC / BSD" to "third_party/licenses/coop-room-client.txt",
     ).map { (name, path) -> name to rootProject.file(path) }
     inputs.files(parts.map { it.second })
     val out = layout.buildDirectory.file("generated/licenses/licenses.txt")
@@ -221,6 +224,25 @@ val licensesAsset by tasks.registering {
     }
 }
 tasks.named("preBuild") { dependsOn(licensesAsset) }
+
+// CO-OP MODE ROOM: libpokedaisy_coop_client.so for every packaged ABI, with cargo-ndk (cargo install cargo-ndk;
+// rustup target add aarch64-linux-android ...). Built when the co-op flag is on, or with -Ppokedaisy.coopNative=true;
+// without it the app runs, and ROOM SERVER says the build has no room client.
+val coopNative = featureFlag("coop") || (findProperty("pokedaisy.coopNative")?.toString() == "true")
+val coopRoomNative by tasks.registering(Exec::class) {
+    val crate = rootProject.file("server/coop-room")
+    val out = layout.buildDirectory.dir("coop-room/jniLibs").get().asFile
+    inputs.dir(crate.resolve("client/src"))
+    inputs.dir(crate.resolve("proto/src"))
+    inputs.files(crate.resolve("Cargo.toml"), crate.resolve("Cargo.lock"), crate.resolve("client/Cargo.toml"), crate.resolve("proto/Cargo.toml"))
+    outputs.dir(out)
+    workingDir = crate
+    commandLine(
+        listOf("cargo", "ndk", "--platform", "26", "-o", out.path) + nativeAbis.flatMap { listOf("-t", it) } +
+            listOf("build", "--release", "-p", "pokedaisy-coop-client", "--features", "jni"),
+    )
+}
+if (coopNative) tasks.named("preBuild") { dependsOn(coopRoomNative) }
 
 tasks.withType<Test> {
     // readNativeTelemetry's bag-read throttle (NativeReader.kt) caches its

@@ -412,6 +412,33 @@ class Prefs(context: Context) {
         get() = p.getBoolean("coop_relay_only", false)
         set(v) = p.edit().putBoolean("coop_relay_only", v).apply()
 
+    /** CO-OP MODE: "friends" (pairings over the relay) or "room" (a room on a coop-room server). */
+    var coopMode: String
+        get() = p.getString("coop_mode", CoopModes.FRIENDS) ?: CoopModes.FRIENDS
+        set(v) = p.edit().putString("coop_mode", v).apply()
+
+    val coopRoomMode: Boolean get() = coopMode == CoopModes.ROOM
+
+    /** The room server, host[:port] (port 9595 when left out). */
+    var coopRoomServer: String
+        get() = p.getString("coop_room_server", "") ?: ""
+        set(v) = p.edit().putString("coop_room_server", v).apply()
+
+    /** The room server certificate's SHA-256, as it prints it (AB:CD:...). */
+    var coopRoomFingerprint: String
+        get() = p.getString("coop_room_fingerprint", "") ?: ""
+        set(v) = p.edit().putString("coop_room_fingerprint", v).apply()
+
+    /** The room server's access key (one line of its authorized keys). */
+    var coopRoomKey: String
+        get() = p.getString("coop_room_key", "") ?: ""
+        set(v) = p.edit().putString("coop_room_key", v).apply()
+
+    /** The room's name (case doesn't matter). */
+    var coopRoomName: String
+        get() = p.getString("coop_room_name", "") ?: ""
+        set(v) = p.edit().putString("coop_room_name", v).apply()
+
     /** The app's language: "AUTO" (the ROM's, or the device's in the Library) or
      * an AppLanguage code ("EN", "JA", ...) - see [com.pokedaisy.app.companion.i18n.L10n]. */
     var appLanguage: String
@@ -954,3 +981,9 @@ class Prefs(context: Context) {
 
 /** DS RESOLUTION's highest scale ([Prefs.dsResolution]). */
 const val DS_RESOLUTION_MAX = 8
+
+/** CO-OP MODE's values ([Prefs.coopMode]). */
+object CoopModes {
+    const val FRIENDS = "friends"
+    const val ROOM = "room"
+}

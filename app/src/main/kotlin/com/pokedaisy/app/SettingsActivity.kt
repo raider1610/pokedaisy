@@ -7,6 +7,7 @@ import com.pokedaisy.app.companion.i18n.tr
 import com.pokedaisy.app.companion.coop.CoopInvite
 import com.pokedaisy.app.companion.coop.CoopRelay
 import com.pokedaisy.app.companion.coop.CoopSession
+import com.pokedaisy.app.companion.coop.room.CoopRoomSession
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -133,7 +134,7 @@ import com.pokedaisy.app.companion.ui.drawPixelRoundRect
  */
 class SettingsActivity : ComponentActivity() {
 
-    private enum class Screen { HOME, SPEED, DISPLAY, HOTKEYS, CONTROLS, SHADERS, FIELD_HUD, QUICK_MENU, TOUCH, OVERLAYS, FOLDERS, ROMS_FOLDERS, SAVES_FOLDER, SAVE_SEARCH, STATES_FOLDER, BACKUPS, COVER_ART, SCREENSCRAPER, HIDDEN, ACHIEVEMENTS, CHEATS, CHEAT_ADD, LICENSES, HELP, COOP_PAIR, COOP_JOIN, COOP_PARTNERS, COOP_RELAY }
+    private enum class Screen { HOME, SPEED, DISPLAY, HOTKEYS, CONTROLS, SHADERS, FIELD_HUD, QUICK_MENU, TOUCH, OVERLAYS, FOLDERS, ROMS_FOLDERS, SAVES_FOLDER, SAVE_SEARCH, STATES_FOLDER, BACKUPS, COVER_ART, SCREENSCRAPER, HIDDEN, ACHIEVEMENTS, CHEATS, CHEAT_ADD, LICENSES, HELP, COOP_PAIR, COOP_JOIN, COOP_PARTNERS, COOP_RELAY, COOP_ROOM }
 
     private lateinit var prefs: Prefs
     private var screen by mutableStateOf(Screen.HOME)
@@ -368,8 +369,9 @@ class SettingsActivity : ComponentActivity() {
                         Screen.LICENSES -> tk("LICENSES")
                         Screen.HELP -> tk("HELP")
                         Screen.COOP_PAIR, Screen.COOP_JOIN -> tk("PAIR")
-                        Screen.COOP_PARTNERS -> tk("PARTNERS")
+                        Screen.COOP_PARTNERS -> tk("FRIENDS")
                         Screen.COOP_RELAY -> tk("RELAY")
+                        Screen.COOP_ROOM -> tk("ROOM SERVER")
                     },
                     m = m,
                     onBack = {
@@ -407,6 +409,7 @@ class SettingsActivity : ComponentActivity() {
                     Screen.COOP_PAIR, Screen.COOP_JOIN -> coop.PairPage(m, small) { screen = Screen.HOME }
                     Screen.COOP_PARTNERS -> coop.PartnersPage(m, revision)
                     Screen.COOP_RELAY -> coop.RelayPage(m, small)
+                    Screen.COOP_ROOM -> coop.RoomPage(m, small)
                 }
             }
             if (tab && !wide) LibraryLook { nm, ns ->
@@ -1473,13 +1476,35 @@ class SettingsActivity : ComponentActivity() {
     private fun coopRows(): List<SettingRow> {
         if (!FeatureFlags.coop(this)) return emptyList()
         fun onOff(on: Boolean) = if (on) tk("ON") else tk("OFF")
+        val modeRow = SettingRow(
+            tk("CO-OP MODE"), if (prefs.coopRoomMode) tk("ROOM") else tk("FRIENDS"),
+            subtitle = if (prefs.coopRoomMode) "Everyone in a room on a server" else "Your paired friends",
+        ) {
+            prefs.coopMode = if (prefs.coopRoomMode) CoopModes.FRIENDS else CoopModes.ROOM
+            revision++
+        }
+        if (prefs.coopRoomMode) return listOf(
+            groupTitle(tk("CO-OP")),
+            modeRow,
+            SettingRow(
+                tk("ROOM SERVER"),
+                if (CoopRoomSession.settingsProblem(prefs.coopRoomServer, prefs.coopRoomFingerprint, prefs.coopRoomKey, prefs.coopRoomName, libraryLoaded = true) == null)
+                    prefs.coopRoomName else tk("NOT SET"),
+                opensPage = true, subtitle = "Server, fingerprint, key and room",
+            ) { screen = Screen.COOP_ROOM },
+            com.pokedaisy.app.companion.ui.nearbyRangeRow(
+                prefs.coopNearbyRange,
+                { title, choices, current, onPick -> selector = Selector(title, choices, current) { onPick(it); revision++ } },
+            ) { prefs.coopNearbyRange = it },
+        )
         return listOf(
             groupTitle(tk("CO-OP")),
+            modeRow,
             SettingRow(
                 tk("PAIR"), null, labelBadge = com.pokedaisy.app.companion.NewFeatures.badge(com.pokedaisy.app.companion.NewFeatures.COOP),
                 opensPage = true, subtitle = "Link one of your Emerald saves with a friend's",
             ) { openCoopPair(null) },
-            SettingRow(tk("PARTNERS"), coop.pairs.size.takeIf { it > 0 }?.toString() ?: tk("NONE"), opensPage = true) { screen = Screen.COOP_PARTNERS },
+            SettingRow(tk("FRIENDS"), coop.pairs.size.takeIf { it > 0 }?.toString() ?: tk("NONE"), opensPage = true) { screen = Screen.COOP_PARTNERS },
             com.pokedaisy.app.companion.ui.nearbyRangeRow(
                 prefs.coopNearbyRange,
                 { title, choices, current, onPick -> selector = Selector(title, choices, current) { onPick(it); revision++ } },

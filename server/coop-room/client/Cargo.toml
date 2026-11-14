@@ -1,0 +1,25 @@
+[package]
+name = "pokedaisy-coop-client"
+description = "PokeDaisy co-op rooms: the app's client (QUIC with a TCP + TLS fallback, a pinned server certificate), with JNI bindings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "pokedaisy_coop_client"
+# rlib for the server's tests; cdylib is the app's libpokedaisy_coop_client.so (built with `--features jni`).
+crate-type = ["rlib", "cdylib"]
+
+[features]
+jni = ["dep:jni"]
+
+[dependencies]
+pokedaisy-coop-proto.workspace = true
+quinn.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+tokio.workspace = true
+log.workspace = true
+bytes = "1"
+jni = { version = "0.21", optional = true, default-features = false }

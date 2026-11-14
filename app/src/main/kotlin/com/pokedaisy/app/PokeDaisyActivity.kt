@@ -2200,8 +2200,14 @@ class PokeDaisyActivity : Activity() {
             prefs.coopRelayOnly = on
             com.pokedaisy.app.companion.coop.CoopSession.restart(this@PokeDaisyActivity, prefs)
         }
-        override fun coopUnpair(save: com.pokedaisy.app.companion.coop.CoopSaveId) =
-            com.pokedaisy.app.companion.coop.CoopSession.unpair(this@PokeDaisyActivity, save)
+        override fun coopUnpair(save: com.pokedaisy.app.companion.coop.CoopSaveId, peer: com.pokedaisy.app.companion.coop.CoopPeerId) =
+            com.pokedaisy.app.companion.coop.CoopSession.unpair(this@PokeDaisyActivity, save, peer)
+        override val coopOnline get() = com.pokedaisy.app.companion.coop.CoopSession.friends.value.filter { it.connected }.map { it.peer }.toSet()
+        override val coopRoomMode get() = Prefs(this@PokeDaisyActivity).coopRoomMode
+        override val coopRoomName get() = Prefs(this@PokeDaisyActivity).coopRoomName
+        override val coopRoomState get() = com.pokedaisy.app.companion.coop.room.CoopRoomSession.state.value
+        override val coopRoomGate get() = com.pokedaisy.app.companion.coop.room.CoopRoomSession.gate.value
+        override val coopRoomMembers get() = com.pokedaisy.app.companion.coop.room.CoopRoomSession.members.value
     }
 
     /** Reverses [Hotkeys.keyName] — "BUTTON_A"/"Z"/etc. back to a keyCode, for the companion's GAME BUTTONS
@@ -2789,7 +2795,7 @@ class PokeDaisyActivity : Activity() {
 
     /**
      * Co-op presence (partner on the field): a [CoopPresence] exists only while a link is attached ([attachCoopLink], the co-op
-     * session's) and the loaded ROM is retail English Emerald (BPEE with [RETAIL_EMERALD_SHA1]); a player without co-op hashes
+     * session's) and the loaded ROM is retail English or German Emerald ([COOP_EMERALD_SHA1S]); a player without co-op hashes
      * nothing and runs nothing.
      */
     private var coopPresence: CoopPresence? = null
@@ -2803,7 +2809,7 @@ class PokeDaisyActivity : Activity() {
 
     private fun setUpCoopPresence(r: File, gba: Boolean, gameCode: String) {
         stopCoopPresence()
-        coopCandidate = if (gba && gameCode == "BPEE" && r.length() == 16L * 1024 * 1024) r else null
+        coopCandidate = if (gba && gameCode in com.pokedaisy.app.companion.coop.COOP_EMERALD_CODES && r.length() == 16L * 1024 * 1024) r else null
         startCoopPresence()
     }
 
@@ -2820,7 +2826,7 @@ class PokeDaisyActivity : Activity() {
                 r.inputStream().use { s -> val b = ByteArray(1 shl 16); while (true) { val n = s.read(b); if (n < 0) break; md.update(b, 0, n) } }
                 md.digest().joinToString("") { "%02x".format(it) }
             }.getOrNull()
-            if (sha1 == RETAIL_EMERALD_SHA1) runOnUiThread {
+            if (sha1 in com.pokedaisy.app.companion.coop.COOP_EMERALD_SHA1S) runOnUiThread {
                 if (!isDestroyed && !isFinishing && generation == coopGeneration && ::engine.isInitialized && engine === eng &&
                     romData == r && coopPresence == null && coopLink != null) createCoopPresence(r)
             }
@@ -2872,7 +2878,11 @@ class PokeDaisyActivity : Activity() {
         coopReceive = null
         p.link = link
         if (link == null) { runOnEmu { p.stop() }; return }
-        coopReceive = lookGender.launch { link.received.collect { p.onReceived(it) } }
+        coopReceive = if (link is CoopPresenceFriendsLink) lookGender.launch {
+            // Every friend's updates, each by who sent it; a friend whose link dropped goes at once.
+            launch { link.gone.collect { p.forget(it) } }
+            link.receivedFrom.collect { (key, bytes) -> p.onReceivedFrom(key, bytes) }
+        } else lookGender.launch { link.received.collect { p.onReceived(it) } }
     }
 
     private fun stopCoopPresence() {
@@ -3013,7 +3023,7 @@ class PokeDaisyActivity : Activity() {
     private fun syncCheats() {
         if (!::engine.isInitialized) return
         val enabled = Prefs(this).cheatsEnabled
-        val coopOn = com.pokedaisy.app.companion.coop.CoopSession.gameOn || coopLock != null
+        val coopOn = com.pokedaisy.app.companion.coop.CoopSession.gameOn || com.pokedaisy.app.companion.coop.room.CoopRoomSession.gameOn || coopLock != null
         val text = com.pokedaisy.app.companion.coop.CoopSession.cheatsForEngine(enabled, coopOn) {
             cheatStore()?.load()?.let(com.pokedaisy.app.cheats.CheatFiles::coreText).orEmpty()
         }
@@ -3030,8 +3040,16 @@ class PokeDaisyActivity : Activity() {
         // A joined battle's games are put back first (before the engine writes any suspend state), then the hook goes.
         if (!CoopBattles.stopNow()) coopLost = true   // fail closed: a game not confirmed put back writes no state
         CoopBattles.detach(coopApp)
+        coopTargetJob?.cancel()
+        coopTargetJob = null
+        coopTarget = null
         stopCoopLock()
-        coopExec.execute { com.pokedaisy.app.companion.coop.CoopSession.stopGame() }
+        coopRoomChannel?.close()
+        coopRoomChannel = null
+        coopExec.execute {
+            com.pokedaisy.app.companion.coop.CoopSession.stopGame()
+            com.pokedaisy.app.companion.coop.room.CoopRoomSession.stopGame()
+        }
     }
 
     // --- co-op joined battles (CoopBattles.kt) ---
@@ -3050,7 +3068,7 @@ class PokeDaisyActivity : Activity() {
 
     /** Cheats are refused (with a notice) while co-op is on for this game: the start gate's rule, held mid-session. */
     private fun coopCheatsRefuse(turningOn: Boolean): Boolean {
-        val on = com.pokedaisy.app.companion.coop.CoopSession.gameOn || coopLock != null
+        val on = com.pokedaisy.app.companion.coop.CoopSession.gameOn || com.pokedaisy.app.companion.coop.room.CoopRoomSession.gameOn || coopLock != null
         if (!com.pokedaisy.app.companion.coop.CoopSession.refusesCheats(turningOn, on)) return false
         showHud(com.pokedaisy.app.companion.i18n.tr("Not while co-op is on."))
         return true
@@ -3059,14 +3077,91 @@ class PokeDaisyActivity : Activity() {
     /** The retail Emerald game has the hook once its SHA-1 is known: hash done off the UI thread by [coopStart]. */
     private fun coopAttach(sha1: String?) {
         if (isDestroyed || isFinishing || !::engine.isInitialized || !engine.running) return
-        val link = com.pokedaisy.app.companion.coop.CoopSession.link
+        val session = com.pokedaisy.app.companion.coop.CoopSession
+        val link = session.link
+        if (!FeatureFlags.coop(this) || sha1 !in com.pokedaisy.app.companion.coop.COOP_EMERALD_SHA1S) return
+        // Every friend online sees this player and is seen (CoopFriendsPresenceChannel); the battles take one friend at a
+        // time, the nearest free one (CoopBattleTarget).
+        attachCoopLink(CoopFriendsPresenceChannel(link, session.friendMessages, session.friends))
+        // Joined battles: retail English Emerald only (German Emerald sees friends, without battles).
         if (!CoopBattles.mayHook(sha1, FeatureFlags.coop(this), link)) return
-        attachCoopLink(CoopPresenceChannel(link))
-        CoopBattles.attach(coopApp, link, sha1)
+        val target = friendsBattleTarget(
+            friends = { session.friends.value },
+            sendTo = { peer, type, payload -> session.sendTo(peer, type, payload) },
+            spotOf = { peer -> coopPresence?.lastReceivedOf(peer.hex)?.takeIf { it.valid }?.let {
+                com.pokedaisy.app.companion.data.coop.CoopJoinRules.Spot(it.mapGroup, it.mapNum, it.fineX / 16, it.fineY / 16)
+            } },
+            clock = android.os.SystemClock::elapsedRealtime,
+        )
+        coopTargetJob?.cancel()
+        coopTarget = target
+        // Unconfined, as CoopBattles' own collectors: battle messages go from the co-op thread straight to the glue, never
+        // by way of the UI thread.
+        coopTargetJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined).launch {
+            launch { session.friends.collect { target.onFriendsChanged() } }
+            session.friendMessages.collect { m -> target.onMessage(m.peer, m.message.type, m.message.payload) }
+        }
+        CoopBattles.attach(coopApp, link, sha1, target)
     }
 
-    @Volatile private var coopPairKeyCache: Pair<com.pokedaisy.app.companion.coop.CoopSaveId, String>? = null
-    @Volatile private var coopPairKeyMissAt = -10_000L
+    /** CO-OP MODE ROOM's attach: everyone in the room is drawn; battles go to one member at a time, by way of the server. */
+    private fun coopAttachRoom(sha1: String?) {
+        if (isDestroyed || isFinishing || !::engine.isInitialized || !engine.running) return
+        if (!FeatureFlags.coop(this) || sha1 == null) return
+        val session = com.pokedaisy.app.companion.coop.room.CoopRoomSession
+        val link = session.link
+        coopRoomChannel?.close()
+        val channel = CoopRoomPresenceChannel(link)
+        coopRoomChannel = channel
+        attachCoopLink(channel)
+        // Battles: only members on the very same ROM (the server refuses direct messages between different ROMs).
+        val target = CoopBattleTarget<Int>(
+            friends = {
+                val up = session.state.value is com.pokedaisy.app.companion.coop.room.RoomState.Connected
+                session.members.value.map { CoopBattlePeer(it.id, up && it.romSha1.equals(sha1, ignoreCase = true)) }
+            },
+            sendTo = { id, type, payload -> session.sendTo(id, type, payload) },
+            spotOf = { id -> coopPresence?.lastReceivedOf(CoopRoomPresenceChannel.key(id))?.takeIf { it.valid }?.let {
+                com.pokedaisy.app.companion.data.coop.CoopJoinRules.Spot(it.mapGroup, it.mapNum, it.fineX / 16, it.fineY / 16)
+            } },
+            clock = android.os.SystemClock::elapsedRealtime,
+        )
+        coopTargetJob?.cancel()
+        coopTarget = target
+        coopTargetJob = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Unconfined).launch {
+            launch { session.members.collect { target.onFriendsChanged() } }
+            launch { session.state.collect { target.onFriendsChanged() } }
+            session.messages.collect { m -> target.onMessage(m.from, m.message.type, m.message.payload) }
+        }
+        CoopBattles.attach(coopApp, null, sha1, target)
+    }
+
+    private var coopRoomChannel: CoopRoomPresenceChannel? = null
+
+    /** The battle partner's key for presence and catches: a friend's peer id, or a room member's "room:<id>". */
+    private fun coopTargetKey(): String? = when (val t = coopTarget?.target) {
+        is com.pokedaisy.app.companion.coop.CoopPeerId -> t.hex
+        is Int -> CoopRoomPresenceChannel.key(t)
+        else -> null
+    }
+
+    /** The joined battles' partner among the friends, while a game has the hook. */
+    @Volatile private var coopTarget: CoopBattleTarget<*>? = null
+    private var coopTargetJob: kotlinx.coroutines.Job? = null
+
+    /** The battles' partner as a friend of the running save (name, peer), or null. */
+    private fun coopTargetFriend(): com.pokedaisy.app.companion.coop.CoopFriendState? {
+        val t = coopTarget?.target as? com.pokedaisy.app.companion.coop.CoopPeerId ?: return null
+        return com.pokedaisy.app.companion.coop.CoopSession.friends.value.firstOrNull { it.peer == t }
+    }
+
+
+    /** The battles' partner as a room member's trainer name, or null. */
+    private fun coopTargetMemberName(): String? {
+        val id = coopTarget?.target as? Int ?: return null
+        val m = com.pokedaisy.app.companion.coop.room.CoopRoomSession.members.value.firstOrNull { it.id == id } ?: return null
+        return com.pokedaisy.app.companion.data.Gen3Text.decode(m.save.name, 0, 8).trim().ifEmpty { null }
+    }
 
     private val catchFile by lazy { com.pokedaisy.app.companion.data.coop.FileCatchStore(File(File(filesDir, "coop"), "catches.txt")) }
 
@@ -3087,8 +3182,14 @@ class PokeDaisyActivity : Activity() {
                 if (s.size < 5 || s[0] == 0) return null
                 return com.pokedaisy.app.companion.data.coop.CoopJoinRules.Spot(s[1], s[2], s[3] / 16, s[4] / 16)
             }
+            override fun pickPartner(idle: Boolean) {
+                val t = coopTarget ?: return
+                t.idle = idle
+                t.choose(mySpot(), range)
+            }
             override fun partnerSpot(): com.pokedaisy.app.companion.data.coop.CoopJoinRules.Spot? {
-                val u = coopPresence?.lastReceived?.takeIf { it.valid } ?: return null
+                val key = coopTargetKey() ?: return null
+                val u = coopPresence?.lastReceivedOf(key)?.takeIf { it.valid } ?: return null
                 return com.pokedaisy.app.companion.data.coop.CoopJoinRules.Spot(u.mapGroup, u.mapNum, u.fineX / 16, u.fineY / 16)
             }
             override fun hostParty(): List<ByteArray> {
@@ -3098,16 +3199,8 @@ class PokeDaisyActivity : Activity() {
             }
             override fun foeSpecies(): Int = MgbaCore.pkReadBytes(CoopEmeraldRam.ENEMY_PARTY, CoopEmeraldRam.MON_SIZE)
                 ?.let { runCatching { com.pokedaisy.app.companion.data.save.Gen3BoxMon.read(it, 0).species }.getOrNull() } ?: 0
-            override fun partnerName(): String {
-                val st = com.pokedaisy.app.companion.coop.CoopSession.link.state.value
-                val p = when (st) {
-                    is com.pokedaisy.app.companion.coop.CoopState.Connected -> st.partner
-                    is com.pokedaisy.app.companion.coop.CoopState.Connecting -> st.partner
-                    is com.pokedaisy.app.companion.coop.CoopState.Disconnected -> st.partner
-                    else -> null
-                }
-                return p?.name ?: com.pokedaisy.app.companion.i18n.tr("PARTNER")
-            }
+            override fun partnerName(): String =
+                coopTargetFriend()?.pair?.partner?.name ?: coopTargetMemberName() ?: com.pokedaisy.app.companion.i18n.tr("PARTNER")
             private fun saveId(): com.pokedaisy.app.companion.coop.CoopSaveId? {
                 coopSaveId?.let { return it }
                 val r = rom ?: return null
@@ -3134,23 +3227,19 @@ class PokeDaisyActivity : Activity() {
                 }
             }
             override fun playTogetherOnly() = coopLock?.ui?.value?.locked == true
-            /** Own save + the paired partner's key (never a display name: a rename or a missing name must not orphan catches). Resolved once per save. */
+            /**
+             * Own save + the battle partner's key (never a display name: a rename or a missing name must not orphan catches):
+             * a friend's un-acknowledged catches wait for that friend, whichever friend the partner is now.
+             */
             override fun pairKey(): String {
                 val sid = saveId() ?: return ""
-                coopPairKeyCache?.let { if (it.first == sid) return it.second }
-                val now = android.os.SystemClock.elapsedRealtime()
-                if (now - coopPairKeyMissAt < 5_000L) return sid.key + ":unpaired"   // the pairs file is not read every tick
-                val st = com.pokedaisy.app.companion.coop.CoopSession.link.state.value
-                val live = when (st) {
-                    is com.pokedaisy.app.companion.coop.CoopState.Connected -> st.partner
-                    is com.pokedaisy.app.companion.coop.CoopState.Connecting -> st.partner
-                    is com.pokedaisy.app.companion.coop.CoopState.Disconnected -> st.partner
-                    else -> null
+                // A room member's key is their trainer (ids + name), not the member id: that changes on every connect.
+                val member = (coopTarget?.target as? Int)?.let { id ->
+                    com.pokedaisy.app.companion.coop.room.CoopRoomSession.members.value.firstOrNull { it.id == id }
                 }
-                val peer = live?.peer?.hex
-                    ?: com.pokedaisy.app.companion.coop.CoopSession.pairsList(this@PokeDaisyActivity).firstOrNull { it.ownSave == sid }?.partner?.peer?.hex
-                if (peer == null) { coopPairKeyMissAt = now; return sid.key + ":unpaired" }
-                return (sid.key + ":" + peer).also { coopPairKeyCache = sid to it }
+                if (member != null) return sid.key + ":room-" + member.save.key
+                val peer = (coopTarget?.target as? com.pokedaisy.app.companion.coop.CoopPeerId)?.hex ?: return sid.key + ":unpaired"
+                return sid.key + ":" + peer
             }
             override fun catchStore() = catchFile
             override fun log(text: String) { Log.i("pokedaisy/coop", text) }
@@ -3238,12 +3327,17 @@ class PokeDaisyActivity : Activity() {
 
     /** One [CoopLock] for the game just started, when its save has a pairing (off the UI thread: [gen] tells a stop from a late start). */
     private fun startCoopLock(sha1: String?, save: File, cheatsLoaded: Boolean, gen: Int) {
+        // The lock patches English Emerald's code: German Emerald plays together without it.
+        if (sha1 != com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1) return
         val id = com.pokedaisy.app.companion.coop.CoopSaveId.read(save) ?: return
         if (com.pokedaisy.app.companion.coop.CoopSession.gate(sha1, id, true, cheatsLoaded) != null) return
-        val pair = com.pokedaisy.app.companion.coop.CoopSession.pairsList(this).firstOrNull { it.ownSave.key == id.key } ?: return
-        val link = com.pokedaisy.app.companion.coop.CoopSession.link
+        // PLAY TOGETHER ONLY is with one friend: the one it is on with, else the oldest friend (who it was with before friends).
+        val store = com.pokedaisy.app.companion.coop.lock.CoopLockStore(File(File(filesDir, "coop"), "locks.json"))
+        val friends = com.pokedaisy.app.companion.coop.CoopSession.pairsList(this).filter { it.ownSave.key == id.key }
+        val pair = friends.firstOrNull { store.isLocked(id.key, it.partner.save.key) } ?: friends.firstOrNull() ?: return
+        val link = com.pokedaisy.app.companion.coop.CoopSession.friendLink(pair.partner.peer)
         val lock = CoopLock(
-            link, com.pokedaisy.app.companion.coop.lock.CoopLockStore(File(File(filesDir, "coop"), "locks.json")),
+            link, store,
             id.key, pair.partner.save.key, MgbaLockNative,
             {
                 val b = MgbaCore.pkReadBytes(com.pokedaisy.app.companion.data.coop.COOP_PLAYER_PARTY_COUNT, 1)
@@ -3273,7 +3367,26 @@ class PokeDaisyActivity : Activity() {
         val rev = romRev
         stopCoopLock()
         val gen = coopLockGen.get()
+        if (prefs.coopRoomMode) {
+            // CO-OP MODE ROOM: the friends stay off; every Emerald-based ROM may join (the server matches the family).
+            coopExec.execute {
+                com.pokedaisy.app.companion.coop.CoopSession.stopGame()
+                if (!com.pokedaisy.app.companion.coop.CoopSession.mayBeRetailEmerald(code, RomArchive.romSize(r))) {
+                    com.pokedaisy.app.companion.coop.room.CoopRoomSession.startForGame(applicationContext, prefs, null, save, cheatsLoaded)
+                    return@execute
+                }
+                val own = RomIdentity.sha1(r)
+                val sha1 = if (own == com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1) own
+                    else com.pokedaisy.app.companion.data.RetailDumps.matchStream(code, rev, RomArchive.romSize(r)) { RomArchive.open(r) } ?: own
+                com.pokedaisy.app.companion.coop.room.CoopRoomSession.startForGame(applicationContext, prefs, sha1, save, cheatsLoaded) { on ->
+                    // Presence and battles only for a room that started (not one the gate kept off).
+                    if (on) runOnUiThread { coopAttachRoom(sha1) }
+                }
+            }
+            return
+        }
         coopExec.execute {
+            com.pokedaisy.app.companion.coop.room.CoopRoomSession.stopGame()
             if (!com.pokedaisy.app.companion.coop.CoopSession.mayBeRetailEmerald(code, RomArchive.romSize(r))) {
                 com.pokedaisy.app.companion.coop.CoopSession.startForGame(applicationContext, prefs, null, save, cheatsLoaded)
                 return@execute
@@ -3282,7 +3395,7 @@ class PokeDaisyActivity : Activity() {
             val sha1 = if (own == com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1) own
                 else com.pokedaisy.app.companion.data.RetailDumps.matchStream(code, rev, RomArchive.romSize(r)) { RomArchive.open(r) } ?: own
             com.pokedaisy.app.companion.coop.CoopSession.startForGame(applicationContext, prefs, sha1, save, cheatsLoaded)
-            runOnUiThread { coopAttach(sha1) }   // joined battles + presence: retail English Emerald only
+            runOnUiThread { coopAttach(sha1) }   // presence: English and German Emerald; joined battles: English only
             startCoopLock(sha1, save, cheatsLoaded, gen)
         }
     }
@@ -3309,7 +3422,6 @@ class PokeDaisyActivity : Activity() {
         }
         CoopGuards.reset()   // a new game starts with nothing held or blocked by the last one
         coopLost = false
-        coopPairKeyCache = null; coopPairKeyMissAt = -10_000L
         coopSaveId = null   // identity() and ownName() follow the save of this game
         coopStart(r, save)
         // Auto-resume from wherever was written most recently: normally that's
@@ -5627,8 +5739,6 @@ class PokeDaisyActivity : Activity() {
     }
 
     companion object {
-        /** Retail English Emerald (BPEE): the only game co-op presence runs on. */
-        private const val RETAIL_EMERALD_SHA1 = "f3ae088181bf583e55daf962a92bb46f4f1d07b7"
         /** Games whose Pokémon follow the player already: FOLLOWER isn't offered there. */
         private val FOLLOWERS_OF_THEIR_OWN = setOf(
             com.pokedaisy.app.companion.data.GameKind.HEART_AND_SOUL, com.pokedaisy.app.companion.data.GameKind.SOULGOLD,

@@ -139,6 +139,12 @@ object MgbaCore {
      * sprites at each frame's line 0, put back after line 159 (pk_wide.c's partnerBegin / partnerEnd). Emu thread. */
     external fun pkPartnerPlace(visible: Boolean, fineX: Int, fineY: Int, frame: Int, hflip: Boolean, blobFrame: Int, bob: Int)
 
+    /** [pkPartnerSet] for co-op friend [slot] (0 until PK_PARTNER_MAX, 4; another slot is ignored). */
+    external fun pkPartnerSetN(slot: Int, art: ByteArray?)
+
+    /** [pkPartnerPlace] for co-op friend [slot] (0 until PK_PARTNER_MAX, 4; another slot is ignored). */
+    external fun pkPartnerPlaceN(slot: Int, visible: Boolean, fineX: Int, fineY: Int, frame: Int, hflip: Boolean, blobFrame: Int, bob: Int)
+
     // pkFieldState's bits (pk_wide.h's PK_FIELD_*).
     const val FIELD_KNOWN = 1
     const val FIELD_LOCKED = 2

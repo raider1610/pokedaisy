@@ -30,7 +30,8 @@ import com.pokedaisy.app.companion.coop.CoopPairing
 import com.pokedaisy.app.companion.coop.CoopRelay
 import com.pokedaisy.app.companion.coop.CoopSaveId
 import com.pokedaisy.app.companion.coop.CoopSession
-import com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1
+import com.pokedaisy.app.companion.coop.COOP_EMERALD_CODES
+import com.pokedaisy.app.companion.coop.COOP_EMERALD_SHA1S
 import com.pokedaisy.app.companion.coop.parseHostPort
 import com.pokedaisy.app.companion.i18n.tk
 import com.pokedaisy.app.companion.i18n.tr
@@ -113,17 +114,18 @@ internal class CoopSettingsPages(
         pairs = withContext(Dispatchers.IO) { CoopSession.pairsList(activity) }
     }
 
-    /** The library's retail English Emerald ROMs, each with its save's trainer (off the UI thread). */
+    /** The library's retail English and German Emerald ROMs, each with its save's trainer (off the UI thread). */
     private fun loadChoices(): List<CoopSaveChoice> {
         val prefs = prefs()
         val pairs = CoopSession.pairsList(activity)
         return RomFolder.libraryRoms(activity, prefs)
-            .filter { it.length() == SettingsActivity.EMERALD_ROM_BYTES && RomIdentity.gameCode(it) == "BPEE" && RomIdentity.sha1(it) == EMERALD_COOP_SHA1 }
-            .map { rom ->
+            .filter { it.length() == SettingsActivity.EMERALD_ROM_BYTES && RomIdentity.gameCode(it) in COOP_EMERALD_CODES }
+            .mapNotNull { rom -> RomIdentity.sha1(rom)?.takeIf { it in COOP_EMERALD_SHA1S }?.let { rom to it } }
+            .map { (rom, sha1) ->
                 val save = SavesLocation.saveFor(activity, prefs, rom)
                 val id = if (save.isFile) CoopSaveId.read(save) else null
-                val pair = id?.let { i -> pairs.firstOrNull { it.ownSave == i } }
-                CoopSaveChoice(rom, save, GameTitles.label(activity, prefs, rom), id, pair?.partner?.name)
+                val friends = id?.let { i -> pairs.filter { it.ownSave == i } }.orEmpty()
+                CoopSaveChoice(rom, save, GameTitles.label(activity, prefs, rom), id, friends.lastOrNull()?.partner?.name, friends.size, sha1)
             }
     }
 
@@ -133,7 +135,7 @@ internal class CoopSettingsPages(
         picked = choice
         joinError = null
         nearbyError = null
-        CoopSession.usePairingSave(choice.save, EMERALD_COOP_SHA1)
+        CoopSession.usePairingSave(choice.save, choice.romSha1)
         val p = CoopSession.pairing(activity)
         pairing = p
         val ticket = ticketIn
@@ -231,12 +233,13 @@ internal class CoopSettingsPages(
         CoopPairBody(view, actions, m, small)
     }
 
-    /** PARTNERS: the pairings, one row each; a tap asks UNPAIR ([UnpairConfirm]). [revision] reloads them. */
+    /** FRIENDS: every friend of every save, one row each (ONLINE while connected); a tap asks UNPAIR ([UnpairConfirm]). [revision] reloads them. */
     @Composable
     fun PartnersPage(m: GbaTextMetrics, revision: Int) {
         LaunchedEffect(revision) { loadPairs() }
-        val rows = if (pairs.isEmpty()) listOf(SettingRow(tk("NO PARTNERS YET"), null, enabled = false) {})
-        else coopPartnerRows(pairs) { unpairing = it }
+        val online = CoopSession.friends.collectAsState().value.filter { it.connected }.map { it.peer }.toSet()
+        val rows = if (pairs.isEmpty()) listOf(SettingRow(tk("NO FRIENDS YET"), null, enabled = false) {})
+        else coopPartnerRows(pairs, online) { unpairing = it }
         Column(Modifier.fillMaxWidth()) {
             OptionListWindow(m, Modifier.fillMaxWidth().weight(1f, fill = false)) {
                 GroupedRows(rows, m, cursor = -1, onClick = { rows[it].onClick() })
@@ -256,7 +259,7 @@ internal class CoopSettingsPages(
             onDismiss = { unpairing = null },
             onConfirm = {
                 unpairing = null
-                CoopSession.unpair(activity, p.ownSave)
+                CoopSession.unpair(activity, p.ownSave, p.partner.peer)
                 pairs = pairs - p
                 changed()
             },
@@ -294,6 +297,68 @@ internal class CoopSettingsPages(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * ROOM SERVER (CO-OP MODE ROOM): the server's address, its certificate fingerprint (the server prints it at start),
+     * the access key and the room's name. Saved together, each checked; a game started afterwards uses them.
+     */
+    @Composable
+    fun RoomPage(m: GbaTextMetrics, small: GbaTextMetrics) {
+        val prefs = prefs()
+        var server by remember { mutableStateOf(prefs.coopRoomServer) }
+        var fingerprint by remember { mutableStateOf(prefs.coopRoomFingerprint) }
+        var key by remember { mutableStateOf(prefs.coopRoomKey) }
+        var room by remember { mutableStateOf(prefs.coopRoomName) }
+        var error by remember { mutableStateOf<String?>(null) }
+        var saved by remember { mutableStateOf(false) }
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+            PageHint(tr("Everyone in the same room on the same server sees each other. Ask whoever runs the server for these."), m, small)
+            OptionListWindow(m, Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = m.u * 4)) {
+                    @Composable
+                    fun field(label: String, value: String, onChange: (String) -> Unit, hint: String, secret: Boolean = false) {
+                        GbaText(tr(label), OptionColors.label, OptionColors.labelShadow, m, Modifier.padding(vertical = m.u * 2))
+                        OptionTextField(value, { onChange(it); error = null; saved = false }, small, placeholder = hint, password = secret)
+                    }
+                    field("SERVER", server, { server = it }, "coop.example.com:9595")
+                    field("FINGERPRINT", fingerprint, { fingerprint = it }, "AB:CD:EF:…")
+                    field("KEY", key, { key = it }, tr("key"), secret = true)
+                    field("ROOM", room, { room = it }, tr("room name"))
+                    error?.let {
+                        GbaText(tr(it), OptionColors.value, OptionColors.valueShadow, small, Modifier.padding(top = m.u * 4), maxLines = 4)
+                    }
+                    if (saved) GbaText(tr("Saved. It's used from the next game you start."), OptionColors.value, OptionColors.valueShadow, small, Modifier.padding(top = m.u * 4), maxLines = 3)
+                    Row(Modifier.padding(vertical = m.u * 4), horizontalArrangement = Arrangement.spacedBy(m.u * 4)) {
+                        OptionButton(tk("SAVE"), m, emphasis = true, onClick = {
+                            val problem = com.pokedaisy.app.companion.coop.room.CoopRoomSession.settingsProblem(
+                                server.trim(), fingerprint.trim(), key.trim(), room.trim(), libraryLoaded = true)
+                            error = roomProblemText(problem)
+                            if (problem == null) {
+                                prefs.coopRoomServer = server.trim()
+                                prefs.coopRoomFingerprint = fingerprint.trim()
+                                prefs.coopRoomKey = key.trim()
+                                prefs.coopRoomName = room.trim()
+                                saved = true
+                                changed()
+                            }
+                        })
+                    }
+                }
+            }
+        }
+    }
+
+    companion object {
+        /** What SETTINGS says about a room setting that isn't usable (English; the caller translates). */
+        fun roomProblemText(p: com.pokedaisy.app.companion.coop.room.RoomSettingsProblem?): String? = when (p) {
+            null -> null
+            com.pokedaisy.app.companion.coop.room.RoomSettingsProblem.SERVER -> "That isn't a server address (host or host:port)"
+            com.pokedaisy.app.companion.coop.room.RoomSettingsProblem.FINGERPRINT -> "That isn't a fingerprint (64 hex digits, colons allowed)"
+            com.pokedaisy.app.companion.coop.room.RoomSettingsProblem.KEY -> "The key is 1-256 characters without spaces"
+            com.pokedaisy.app.companion.coop.room.RoomSettingsProblem.ROOM -> "A room name is 1-32 letters, digits, spaces, _ - or ."
+            com.pokedaisy.app.companion.coop.room.RoomSettingsProblem.NO_LIBRARY -> "This build has no room client"
         }
     }
 }

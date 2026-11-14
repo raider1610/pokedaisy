@@ -59,7 +59,7 @@ internal val STATUS_BAR_PLACES = listOf(tk("OFF"), tk("GAME"), tk("COMPANION"))
 
 internal fun statusBarLabel(on: Boolean, onCompanion: Boolean) = STATUS_BAR_PLACES[if (!on) 0 else if (onCompanion) 2 else 1]
 
-internal enum class Page(val title: String) { HOME(tk("SETTINGS")), TABS(tk("TAB BAR")), BUTTONS(tk("GAME BUTTONS")), HOTKEYS(tk("HOTKEYS")), SHADERS(tk("SHADERS")), FIELD_HUD(tk("HUD")), QUICK_MENU(tk("QUICK MENU")), TOUCH(tk("TOUCH CONTROLS")), SPEED(tk("SPEED OPTIONS")), DISPLAY(tk("DISPLAY OPTIONS")), CHEATS(tk("CHEATS")), TWEAKS(tk("TWEAKS")), COOP_PARTNERS(tk("PARTNERS")), HELP(tk("HELP")) }
+internal enum class Page(val title: String) { HOME(tk("SETTINGS")), TABS(tk("TAB BAR")), BUTTONS(tk("GAME BUTTONS")), HOTKEYS(tk("HOTKEYS")), SHADERS(tk("SHADERS")), FIELD_HUD(tk("HUD")), QUICK_MENU(tk("QUICK MENU")), TOUCH(tk("TOUCH CONTROLS")), SPEED(tk("SPEED OPTIONS")), DISPLAY(tk("DISPLAY OPTIONS")), CHEATS(tk("CHEATS")), TWEAKS(tk("TWEAKS")), COOP_PARTNERS(tk("FRIENDS")), HELP(tk("HELP")) }
 
 /** Where BACK from a page goes: SHADERS opens from DISPLAY OPTIONS, the rest from HOME. */
 internal val Page.parent: Page get() = if (this == Page.SHADERS) Page.DISPLAY else Page.HOME
@@ -264,9 +264,9 @@ fun CompanionSettingsScreen(
                             tick++
                         }
                     } + SettingRow(tk("CANCEL"), null) { page = Page.HOME }
-                    Page.COOP_PARTNERS -> coopPartnerRows(settings.coopPairs) { p ->
+                    Page.COOP_PARTNERS -> coopPartnerRows(settings.coopPairs, settings.coopOnline) { p ->
                         confirm = Confirm(tk("UNPAIR"), tr("Unpair {0}? You'll need a new invite to play together again.", p.partner.name), tk("UNPAIR")) {
-                            settings.coopUnpair(p.ownSave); tick++
+                            settings.coopUnpair(p.ownSave, p.partner.peer); tick++
                         }
                     } + SettingRow(tk("CANCEL"), null) { page = Page.HOME }
                     Page.HELP -> emptyList()
@@ -917,6 +917,7 @@ internal fun coopRows(
     askLock: (CoopLockAsk) -> Unit = {},
 ): List<SettingRow> {
     if (!s.coopEnabled) return emptyList()
+    if (s.coopRoomMode) return roomRows(s, pick)
     val state = s.coopState
     val pairs = s.coopPairs
     val partnerName = when (state) {
@@ -929,7 +930,7 @@ internal fun coopRows(
         is com.pokedaisy.app.companion.coop.CoopState.Off -> when (state.reason) {
             com.pokedaisy.app.companion.coop.CoopOffReason.NOT_PAIRED -> "Pair it on the top screen: CO-OP"
             com.pokedaisy.app.companion.coop.CoopOffReason.CHEATS_ON -> "Turn cheats off to play together"
-            com.pokedaisy.app.companion.coop.CoopOffReason.NOT_EMERALD -> "Co-op needs English Pokémon Emerald."
+            com.pokedaisy.app.companion.coop.CoopOffReason.NOT_EMERALD -> "Co-op needs Pokémon Emerald in English or German."
             else -> null
         }
         is com.pokedaisy.app.companion.coop.CoopState.Disconnected -> when (state.reason) {
@@ -945,12 +946,35 @@ internal fun coopRows(
         groupTitle(tk("CO-OP")),
         SettingRow(tk("LINK"), coopLinkLabel(state), subtitle = why) {},
         SettingRow(tk("PAIR"), null, enabled = false, labelBadge = NewFeatures.badge(NewFeatures.COOP), subtitle = "On the top screen: Settings > CO-OP") {},
-        SettingRow(tk("PARTNERS"), if (pairs.isEmpty()) tk("NONE") else pairs.size.toString(), opensPage = true) { navigate(Page.COOP_PARTNERS) },
+        SettingRow(tk("FRIENDS"), if (pairs.isEmpty()) tk("NONE") else pairs.size.toString(), opensPage = true) { navigate(Page.COOP_PARTNERS) },
         nearbyRangeRow(s.coopNearbyRange, pick) { s.coopNearbyRange = it },
         SettingRow(tk("RELAY"), s.coopRelayValue, enabled = false, subtitle = "Change it in Settings on the top screen") {},
         SettingRow(tk("RELAY ONLY"), if (s.coopRelayOnly) tk("ON") else tk("OFF")) { s.setCoopRelayOnly(!s.coopRelayOnly); changed() },
     ) + listOfNotNull(
         coopLockRow(s.coopLock, s.coopLockActions, partnerName ?: "", askLock),
+    )
+}
+
+/** CO-OP MODE ROOM's group: MODE (top screen), LINK, ROOM and who's in it, NEARBY RANGE. */
+internal fun roomRows(
+    s: CompanionSettings,
+    pick: (title: String, choices: List<String>, current: String, onPick: (String) -> Unit) -> Unit,
+): List<SettingRow> {
+    val state = s.coopRoomState
+    val gate = s.coopRoomGate
+    val members = if (state is com.pokedaisy.app.companion.coop.room.RoomState.Connected) s.coopRoomMembers else emptyList()
+    val names = members.joinToString(", ") {
+        com.pokedaisy.app.companion.data.Gen3Text.decode(it.save.name, 0, 8).trim().ifEmpty { "?" }
+    }
+    return listOf(
+        groupTitle(tk("CO-OP")),
+        SettingRow(tk("CO-OP MODE"), tk("ROOM"), enabled = false, subtitle = "Change it in Settings on the top screen") {},
+        SettingRow(tk("LINK"), roomLinkLabel(state, gate), subtitle = roomLinkWhy(state, gate, System.currentTimeMillis())) {},
+        SettingRow(
+            tk("PLAYERS"), if (members.isEmpty()) tk("NONE") else members.size.toString(),
+            subtitle = names.takeIf { it.isNotEmpty() }?.let { if (it.length > 60) it.take(59) + "…" else it },
+        ) {},
+        nearbyRangeRow(s.coopNearbyRange, pick) { s.coopNearbyRange = it },
     )
 }
 

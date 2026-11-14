@@ -1,0 +1,15 @@
+# docker compose up -d, then: docker compose logs coop-room | grep -i fingerprint
+# First: mkdir -p data && sudo chown 10001 data (the server runs as uid 10001 and writes its certificate there).
+# Put the access keys in ./data/authorized_keys (one per line, # comments allowed); the server rereads it on change.
+services:
+  coop-room:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "9595:9595/udp"   # QUIC
+      - "9595:9595/tcp"   # TCP + TLS fallback
+    environment:
+      CERT_NAMES: ${COOP_ROOM_HOST:-pokedaisy-coop}
+      LOG_LEVEL: info
+    volumes:
+      - ./data:/data

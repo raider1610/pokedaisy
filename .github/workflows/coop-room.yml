@@ -1,0 +1,29 @@
+# Tests the co-op room server and client (server/coop-room): cargo test, plus the client built with its JNI bindings.
+name: Co-op rooms
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/coop-room/**', '.github/workflows/coop-room.yml']
+  pull_request:
+    paths: ['server/coop-room/**', '.github/workflows/coop-room.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coop-room-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/coop-room
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # The runner's Rust toolchain; Cargo.lock pins every crate.
+      - run: cargo test --locked
+      - run: cargo build --locked -p pokedaisy-coop-client --features jni

@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import com.pokedaisy.app.companion.coop.CoopPair
+import com.pokedaisy.app.companion.coop.CoopPairs
 import com.pokedaisy.app.companion.coop.CoopPairing
 import com.pokedaisy.app.companion.coop.CoopOffReason
 import com.pokedaisy.app.companion.coop.CoopDropReason
@@ -124,13 +125,25 @@ fun coopLinkLabel(state: CoopState): String = when (state) {
     }
 }
 
-/** One row per pair: the partner's name and the save it is paired with; a tap asks UNPAIR. */
-fun coopPartnerRows(pairs: List<CoopPair>, onUnpair: (CoopPair) -> Unit): List<SettingRow> =
-    pairs.map { p -> SettingRow(p.partner.name, p.ownLabel) { onUnpair(p) } }
+/**
+ * FRIENDS: one row per friend - the friend's name, ONLINE while their link is up in the running game, and the save they
+ * are a friend of; a tap asks UNPAIR (that friend only).
+ */
+fun coopPartnerRows(pairs: List<CoopPair>, online: Set<CoopPeerId> = emptySet(), onUnpair: (CoopPair) -> Unit): List<SettingRow> =
+    pairs.map { p -> SettingRow(p.partner.name, if (p.partner.peer in online) tk("ONLINE") else null, subtitle = p.ownLabel) { onUnpair(p) } }
 
-/** A save the pairing page offers: [id] null = no save made yet; [pairedWith] = the partner it already has. */
-class CoopSaveChoice(val rom: File, val save: File, val gameLabel: String, val id: CoopSaveId?, val pairedWith: String?) {
-    val usable: Boolean get() = id != null && pairedWith == null
+/**
+ * A save the pairing page offers: [id] null = no save made yet; [pairedWith] = a friend it already has (the newest),
+ * [friendCount] how many. A save takes friends until it has [CoopPairs.MAX_FRIENDS].
+ */
+class CoopSaveChoice(
+    val rom: File, val save: File, val gameLabel: String, val id: CoopSaveId?, val pairedWith: String?,
+    val friendCount: Int = if (pairedWith != null) 1 else 0,
+    /** The ROM's SHA-1: English or German retail Emerald (friends play the same one). */
+    val romSha1: String = com.pokedaisy.app.companion.coop.EMERALD_COOP_SHA1,
+) {
+    val full: Boolean get() = friendCount >= CoopPairs.MAX_FRIENDS
+    val usable: Boolean get() = id != null && !full
 
     /** The trainer's name as the game writes it. */
     val trainer: String? get() = id?.let { Gen3Text.decode(it.name, 0, 7) }
@@ -140,7 +153,7 @@ class CoopSaveChoice(val rom: File, val save: File, val gameLabel: String, val i
 fun coopSaveRows(choices: List<CoopSaveChoice>): List<SettingRow> = choices.map { c ->
     when {
         c.usable -> SettingRow(c.trainer.orEmpty(), "ID " + coopIdText(c.id!!.trainerId), subtitle = c.gameLabel) {}
-        c.pairedWith != null -> SettingRow(c.gameLabel, null, enabled = false, subtitle = tr("Paired with {0}", c.pairedWith)) {}
+        c.full -> SettingRow(c.gameLabel, null, enabled = false, subtitle = "This save has all the friends it can keep. Remove one in FRIENDS first.") {}
         else -> SettingRow(c.gameLabel, null, enabled = false, subtitle = "Save in the game once first") {}
     }
 }
@@ -216,7 +229,8 @@ fun coopFailLine(reason: CoopPairing.CoopPairFail): String = when (reason) {
     CoopPairing.CoopPairFail.VERSION -> "Your partner's PokeDaisy is a different version. Update both to the same one."
     CoopPairing.CoopPairFail.DIFFERENT_ROM -> "Your partner plays a different Emerald ROM."
     CoopPairing.CoopPairFail.SAME_SAVE -> "That's a copy of this same save. Co-op needs two different players."
-    CoopPairing.CoopPairFail.SAVE_ALREADY_PAIRED -> "This save is already paired. Unpair it in PARTNERS first."
+    CoopPairing.CoopPairFail.SAVE_ALREADY_PAIRED -> "You're already friends with this player."
+    CoopPairing.CoopPairFail.FRIENDS_FULL -> "This save has all the friends it can keep. Remove one in FRIENDS first."
     CoopPairing.CoopPairFail.DENIED -> "The other player said no."
     CoopPairing.CoopPairFail.NETWORK -> "Couldn't reach your partner. Check the internet and try again."
     CoopPairing.CoopPairFail.TIMEOUT -> "No answer. Try again."
@@ -264,7 +278,7 @@ private fun CoopSavePick(m: GbaTextMetrics, small: GbaTextMetrics, choices: List
                     GbaText(tr("NO EMERALD SAVES"), OptionColors.muted, OptionColors.mutedShadow, m)
                     Spacer(Modifier.height(m.u * 4))
                     GbaText(
-                        tr("Co-op needs English Pokémon Emerald."), OptionColors.label, OptionColors.labelShadow, small,
+                        tr("Co-op needs Pokémon Emerald in English or German."), OptionColors.label, OptionColors.labelShadow, small,
                         maxLines = Int.MAX_VALUE,
                     )
                 }
@@ -476,4 +490,61 @@ fun coopWifiAddress(): String? = try {
     (own.firstOrNull { it.first.name.startsWith("wlan") } ?: own.firstOrNull { it.second.isSiteLocalAddress })?.second?.hostAddress
 } catch (e: java.io.IOException) {
     null
+}
+
+
+/** CO-OP MODE ROOM's LINK value: the gate's reason while off, else the connection's state. */
+fun roomLinkLabel(state: com.pokedaisy.app.companion.coop.room.RoomState, gate: com.pokedaisy.app.companion.coop.room.RoomOffReason?): String {
+    if (gate != null) return when (gate) {
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.NOT_SET_UP -> tk("NOT SET UP")
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.NO_LIBRARY -> tk("NO ROOM CLIENT")
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.NOT_EMERALD -> tk("NOT EMERALD")
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.CHEATS_ON -> tk("CHEATS ON")
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.NO_SAVE -> tk("OFF")
+    }
+    return when (state) {
+        is com.pokedaisy.app.companion.coop.room.RoomState.Off -> tk("OFF")
+        is com.pokedaisy.app.companion.coop.room.RoomState.Connecting -> tk("CONNECTING")
+        is com.pokedaisy.app.companion.coop.room.RoomState.Connected -> tk("CONNECTED")
+        is com.pokedaisy.app.companion.coop.room.RoomState.Disconnected ->
+            if (state.reason.needsSettings) tk("CHECK SETTINGS") else tk("RECONNECTING")
+    }
+}
+
+/** CO-OP MODE ROOM's LINK subtitle (English, translated by the row): why, or the room and how it's reached. */
+fun roomLinkWhy(
+    state: com.pokedaisy.app.companion.coop.room.RoomState,
+    gate: com.pokedaisy.app.companion.coop.room.RoomOffReason?,
+    nowMs: Long,
+): String? {
+    if (gate != null) return when (gate) {
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.NOT_SET_UP -> "Set up ROOM SERVER on the top screen: CO-OP"
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.NO_LIBRARY -> "This build has no room client"
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.NOT_EMERALD -> "Rooms need a Pokémon Emerald ROM."
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.CHEATS_ON -> "Turn cheats off to play together"
+        com.pokedaisy.app.companion.coop.room.RoomOffReason.NO_SAVE -> "Save the game once to join a room"
+    }
+    return when (state) {
+        is com.pokedaisy.app.companion.coop.room.RoomState.Off -> null
+        is com.pokedaisy.app.companion.coop.room.RoomState.Connecting -> state.room
+        is com.pokedaisy.app.companion.coop.room.RoomState.Connected ->
+            tr("{0} over {1}", state.room, if (state.transport == com.pokedaisy.app.companion.coop.room.RoomTransportKind.QUIC) "QUIC" else "TLS")
+        is com.pokedaisy.app.companion.coop.room.RoomState.Disconnected -> when (state.reason) {
+            com.pokedaisy.app.companion.coop.room.RoomDropReason.PIN_MISMATCH -> tr("The server's fingerprint doesn't match")
+            com.pokedaisy.app.companion.coop.room.RoomDropReason.BAD_KEY -> tr("The server didn't take the key")
+            com.pokedaisy.app.companion.coop.room.RoomDropReason.VERSION -> tr("The server runs another co-op version")
+            com.pokedaisy.app.companion.coop.room.RoomDropReason.WRONG_GAME -> tr("That room plays another game")
+            com.pokedaisy.app.companion.coop.room.RoomDropReason.BAD_SETTINGS -> tr("Check ROOM SERVER on the top screen")
+            else -> {
+                val secs = ((state.retryAtMs - nowMs + 999) / 1000).coerceAtLeast(0)
+                val what = when (state.reason) {
+                    com.pokedaisy.app.companion.coop.room.RoomDropReason.ROOM_FULL -> tr("The room is full")
+                    com.pokedaisy.app.companion.coop.room.RoomDropReason.SERVER_FULL -> tr("The server is full")
+                    com.pokedaisy.app.companion.coop.room.RoomDropReason.UNREACHABLE -> tr("Can't reach the server")
+                    else -> tr("Connection lost")
+                }
+                tr("{0}: trying again in {1} s", what, secs.toString())
+            }
+        }
+    }
 }

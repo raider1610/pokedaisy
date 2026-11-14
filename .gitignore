@@ -67,3 +67,6 @@ __pycache__/
 
 # ROM lists for make rom-support LIST=... (scripts/rom_agent/): local paths, never committed
 roms-to-add*.txt
+
+# The co-op room server's and client's Rust build output.
+server/coop-room/target/

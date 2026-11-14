@@ -1,0 +1,10 @@
+[package]
+name = "pokedaisy-coop-proto"
+description = "PokeDaisy co-op rooms: the wire format shared by the room server and the app's client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sha2.workspace = true
